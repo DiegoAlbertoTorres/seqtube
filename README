@@ -1,0 +1,116 @@
+Diego Alberto Torres Quintanilla
+This is my final project for CS426: Building Decentralized Systems
+
+This README provides a brief description of the code for the project. Additionally,
+you can find a final writeup in the Proposals folder, which contains some conclusions are
+further improvements. There are also some notes for testing at the end of the file.
+
+ChatDialog.cc contains most of the code for the project. Particularly, it contains all 
+the interesting code. Most of the code ended up in this class because it avoids excessive 
+calls between objets that would only access the GUI.
+
+The following is a list and description of the most important functions of the project, 
+all contained in ChatDialog.cc, which is divided in sections (#### SECTION #####). Look 
+for sections to find relevant functions. The functions described in this README file are 
+all near the top of ChatDialog.cc and are located in the SHARED FILE FUNCTIONS, MERKLE 
+TREE BUILDING FUNCTIONS and DOWNLOAD FUNCTIONS sections. Note that many other functions 
+were written for this project, but are not as important (or are uninteresting GUI code).
+
+void buildSharedFile(QString filePath):
+This function accomplishes all the tasks that have to be done to add a file to the shared 
+system. It gets the file's basic information (size, name), creates the file's Merkle tree 
+in the database, inserts the file's information to the file table in the database, and 
+puts the file in the GUI file list and a map of all files (used for many purposes).
+
+QByteArray buildMerkleTree(QDataStream &in):
+Returns the head hash of a file.
+This is the function that creates the Merkle tree that represents a file. This merkle 
+tree is created inside the system's database. The function is aided by two helper 
+functions: fillQ0 and hashQueue. The algorithm that this function implements builds the 
+merkle tree without loading the entire file into memory, which is important because files 
+can be very big. It does this by creating multiple levels of queues, which correspond to 
+the levels of the Merkle tree. The bottom queue (Q0) is filled with hashes of blocks of 
+the file, and is always kept full (a queue is full when it contains HASHESPERBLOCK 
+hashes). When a queue is full, its contents are hashed as a single block, and the 
+resulting hash is pushed to the queue one level above it. The algorithm then moves to the 
+queue above. If this queue is full, then it hashes it and keeps moving up. Otherwise, the 
+algorithm falls to the lower queues, restarting the process. The algorithm will only 
+finish when it reaches the bottom queue and it is no longer full. This only happens when 
+Q0 cannot be filled any more, meaning that the end of the file was reached. After this, 
+all the remaining contents in the queues are hashed as if they were full. Once the 
+algorithm is done, the last hash is taken as the head hash of the file, which is used
+to identify files by the search capabilities of the program. This hash is the returned
+value.
+
+void startFileDownload(QString fileName, quint64 size, QByteArray hashHead, 
+QList<QString> peers):
+This function begins the download of a file. Its arguments are received from the 
+SearchDialog class, which instantiates the search widgets in the GUI. It requests the 
+first level of the tree (makeBlockRequest) from a random peer in the list of peers with 
+the file. Please see the header for the file download class: the class contains a 
+priority queue called blockQ, which contains the block hashes in the correct order to 
+download the file sequentially. Additionally, it has a map called pendingReqs, which is 
+used to store requests while they are fulfilled by the corresponding peer.
+
+void makeBlockRequest(FileDownload* download, QString dest, QString priority, QByteArray 
+blockHash):
+Makes request to peer dest. This implies adding the request to pendingReqs. Additionally, 
+the request is added to a hash called hashToFile, used to identify the file to which 
+incoming blockReplies correspond to (so that a blockReply is put in the right file upon 
+receive).
+
+void clockRequests(FileDownload* download):
+This function clocks all pending requests in a download. This clock defines when a block 
+request is timed out and put back in our priority queue, to be requested from another 
+peer. This function is called whenever a request is fulfilled by a peer. If a pending 
+request is clocked many times (the peer is taking too long, compared to other peers), 
+then it is put back in the request priority queue. Additional to this timeout mechanism 
+is a regular timer, which counts seconds.
+
+void enqueueMetadata(FileDownload* download, BlockRequest* req, QByteArray blockData):
+When a blockReply is received and it does not contain data (thus containing metadata),
+the hashes in the reply are added to the blockQ priority queue, in order to request more
+blocks. See note at end about prioritization in blockQ*.
+
+void handleBlockRequest(Peer inPeer, QString dest, QString origin, quint32 hopLimit, QByteArray blockRequest):
+Takes the block request, looks for the corresponding block in the database, and sends
+it back.
+
+void handleBlockReply(QString dest, QString origin, quint32 hopLimit, QByteArray 
+blockReply, QByteArray blockData, bool isData, quint64 idx):
+Handles a block reply. Important things are that it identifies the download to which a
+reply corresponds to and then finds the corresponding pending request. It clears the
+pending request, can writes the data to file is the reply contains data, otherwise it
+enqueues the metadata contents. It also verifies that the contents of the reply
+match the data. If not, the request is reinserted into the queue.
+
+*Note on prioritization:
+The prioritization of hashes to be requested is very interesting. This prioritization, 
+used by the blockQ priority queue, is used to order the nodes in the merkle tree in a 
+pre-order traversal, which is the traversal that enables a sequential order of the 
+leaves, only going through nodes that are predecessors of the leaf. And so, for example, 
+if a request is timed out and reinserted into the blockQ, its priority will ensure that 
+it is inserted according to its spot in the pre-order, and downloaded soon if its 
+priority requires it. The priority queue, blockQ, uses a QString as the priority value. 
+Whenever a blockReply is received, the priority of the request that was fulfilled by this 
+reply is found. Then, for each hash in the received metadata is pushed into the blockQ. 
+The priority of each hash is the priority string of the fulfilled request, plus one 
+character (see enqueueMetadata). To understand this more easily, a Merkle tree is 
+prioritized as follows, and the blockQ will then look as pictured:
+
+Merkle Tree:
+			 ___________a___________
+			/			|			\
+		  aa			ab		 	 ac
+		/  |  \   	 /  |  \       /  |  \
+	 aaa  aab aac   aba abb abc  aca acb acc
+
+blockQ with full tree:
+HEAD < a < aa < aaa < aab < aac < ab < aba < abb < abc < ac < aca < acb < acc < TAIL
+
+Note that the merkle tree structure does not store priority, this priotization is entirely
+handled and created by the client as a file is downloaded.
+
+For Testing:
+Note that, like peerster, nodes have to be connected manually on the right side of the
+program. Type host addresses on the top right corner.
